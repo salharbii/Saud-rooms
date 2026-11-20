@@ -13,9 +13,13 @@ export default function Dashboard() {
   const sum = (k) => r2(rows.reduce((s, r) => s + r[k], 0));
   const occ = db.tenants.filter((t) => t.active).length;
   const cnt = (s) => act.filter((r) => r.status === s).length;
+  const bills = db.electricity_bills.filter((b) => b.year === y && b.month === m);
+  const eTot = r2(bills.reduce((s, b) => s + Number(b.amount), 0));
+  const ePaid = r2(bills.reduce((s, b) => s + Number(b.paid_amount || 0), 0));
   const items = [
     ['الغرف المشغولة', occ], ['الغرف الشاغرة', 20 - occ],
-    ['إجمالي الإيجارات', money(sum('rent'))], ['إجمالي الكهرباء', money(sum('electricity'))],
+    ['إجمالي الإيجارات', money(sum('rent'))],
+    ['فواتير الكهرباء', money(eTot)], ['كهرباء مدفوعة', money(ePaid)], ['كهرباء متبقية', money(eTot - ePaid)],
     ['صيانة على المستأجرين', money(sum('maintenance'))], ['صيانة على المؤجر', money(landlordMaintenance(db, y, m))],
     ['إجمالي الخصومات', money(sum('discounts'))], ['إجمالي المستحق', money(sum('total_due'))],
     ['إجمالي المحصّل', money(sum('paid'))], ['إجمالي المتبقي', money(sum('remaining'))],
