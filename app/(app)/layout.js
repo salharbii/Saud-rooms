@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-const LINKS = [['/', 'الرئيسية'], ['/rooms', 'الغرف'], ['/electricity', 'الكهرباء'], ['/maintenance', 'الصيانة والمصاريف'], ['/reports', 'التقارير']];
+const LINKS = [['/', 'الرئيسية'], ['/rooms', 'الغرف'], ['/contracts', 'غير الشهرية'], ['/electricity', 'الكهرباء'], ['/maintenance', 'الصيانة والمصاريف'], ['/reports', 'التقارير']];
 
 export default function AppLayout({ children }) {
   const router = useRouter();

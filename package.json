@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test tests/calc.test.js"
+    "test": "node --test tests/calc.test.js tests/contracts.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
