@@ -26,7 +26,7 @@ export default function Reports() {
     XLSX.utils.book_append_sheet(wb, ws, 'تقرير');
     XLSX.writeFile(wb, name + '.xlsx');
   }
-  const file = (k) => `SAUD-ROOMS-${k}-${y}${scope === 'year' && k !== 'rooms' ? '' : '-' + String(m).padStart(2, '0')}`;
+  const file = (k) => `SAUD-ROOMS-${k}-${y}${scope === 'year' && k !== 'rooms' && k !== 'final' ? '' : '-' + String(m).padStart(2, '0')}`;
   const inScope = (yy, mm) => yy === y && (scope === 'year' || mm === m);
   const qq = q.trim();
   const tn = (id) => db.tenants.find((t) => t.id === id)?.name || '—';
@@ -70,6 +70,24 @@ export default function Reports() {
     data.push(['الإجمالي', '', '', eAmt, ePaid, r2(eAmt - ePaid), '']);
     excel(eheads, data, file('electricity'));
   };
+
+  // 4) التقرير النهائي (ملخص الشهر)
+  const fRows = allRows.filter((r) => (r.active || showOld) && !hidden.includes(r.tenant_id));
+  const inMonth = (d) => +d.slice(0, 4) === y && +d.slice(5, 7) === m;
+  const fDue = sum(fRows, (r) => r.total_due - r.previous_balance);
+  const fPaid = sum(fRows, (r) => r.paid);
+  const fMaint = sum(db.maintenance.filter((x) => !hidden.includes(x.tenant_id) && inMonth(x.date)), (x) => Number(x.amount));
+  const fBills = db.electricity_bills.filter((b) => b.year === y && b.month === m);
+  const fElecDue = sum(fBills, (b) => Number(b.amount));
+  const fElecPaid = sum(fBills, (b) => Number(b.paid_amount || 0));
+  const netDue = r2(fDue - fMaint - fElecDue);
+  const netPaid = r2(fPaid - fMaint - fElecPaid);
+  const fExcel = () => excel(['البند', 'المستحق', 'الفعلي'], [
+    ['الإيجارات وما سُجّل على المستأجرين', fDue, fPaid],
+    ['الصيانة (خصم)', -fMaint, -fMaint],
+    ['الكهرباء (خصم)', -fElecDue, -fElecPaid],
+    ['الصافي النهائي', netDue, netPaid],
+  ], file('final'));
 
   return (
     <>
@@ -144,6 +162,25 @@ export default function Reports() {
           ))}{!bills.length && <tr><td colSpan="7" className="muted">لا فواتير</td></tr>}</tbody>
           <tfoot><tr><td colSpan="3">الإجمالي</td><td>{money(eAmt)}</td><td>{money(ePaid)}</td><td>{money(eAmt - ePaid)}</td><td></td></tr></tfoot>
         </table></div>
+      </section>
+
+      <section style={{ marginTop: 22 }}>
+        <div className="row" style={{ justifyContent: 'space-between', marginTop: 0 }}>
+          <h3 style={{ margin: 0 }}>4) التقرير النهائي – {MONTHS[m - 1]} {y}</h3>
+          <button className="btn sm no-print" onClick={fExcel}>تصدير Excel</button>
+        </div>
+        <div className="tablewrap" style={{ marginTop: 8 }}><table style={{ minWidth: 0 }}>
+          <thead><tr><th>البند</th><th>المستحق</th><th>الفعلي</th></tr></thead>
+          <tbody>
+            <tr><td>الإيجارات وما سُجّل على المستأجرين</td><td>{money(fDue)}</td><td>{money(fPaid)}</td></tr>
+            <tr><td>الصيانة (خصم)</td><td>− {money(fMaint)}</td><td>− {money(fMaint)}</td></tr>
+            <tr><td>الكهرباء (خصم)</td><td>− {money(fElecDue)}</td><td>− {money(fElecPaid)}</td></tr>
+          </tbody>
+          <tfoot><tr><td>الصافي النهائي</td>
+            <td style={{ color: netDue < 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(netDue)}</td>
+            <td style={{ color: netPaid < 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(netPaid)}</td></tr></tfoot>
+        </table></div>
+        <p className="muted">الصافي = الإيجارات − الصيانة − الكهرباء. «المستحق» حسب ما يجب تحصيله، و«الفعلي» حسب ما دُفع فعلاً.</p>
       </section>
     </>
   );
