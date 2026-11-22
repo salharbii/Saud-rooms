@@ -14,6 +14,7 @@ export default function Reports() {
   const [q, setQ] = useState('');
   const [sf, setSf] = useState('all');
   const [hidden, setHidden] = useState([]);
+  const [showOld, setShowOld] = useState(false);
   const bad = Load({ db, err });
   if (bad) return bad;
 
@@ -28,10 +29,13 @@ export default function Reports() {
   const file = (k) => `SAUD-ROOMS-${k}-${y}${scope === 'year' && k !== 'rooms' ? '' : '-' + String(m).padStart(2, '0')}`;
   const inScope = (yy, mm) => yy === y && (scope === 'year' || mm === m);
   const qq = q.trim();
+  const tn = (id) => db.tenants.find((t) => t.id === id)?.name || '—';
 
-  // 1) تقرير الغرف
-  const rows = monthReport(db, y, m).filter((r) =>
-    !hidden.includes(r.room_id) && (sf === 'all' || r.status === sf) &&
+  // 1) تقرير الغرف (الإخفاء لكل شخص على حدة)
+  const allRows = monthReport(db, y, m);
+  const oldRows = allRows.filter((r) => !r.active);
+  const rows = allRows.filter((r) =>
+    (r.active || showOld) && !hidden.includes(r.tenant_id) && (sf === 'all' || r.status === sf) &&
     (!qq || (/^\d+$/.test(qq) ? r.room_id === +qq : r.tenant.includes(qq))));
   const rkeys = ['rent', 'previous_balance', 'total_due', 'paid', 'remaining'];
   const rtot = {}; rkeys.forEach((k) => (rtot[k] = sum(rows, (r) => r[k])));
@@ -43,9 +47,8 @@ export default function Reports() {
   };
 
   // 2) تقرير الصيانة
-  const tn = (id) => db.tenants.find((t) => t.id === id)?.name || '—';
   const maint = db.maintenance
-    .filter((x) => !hidden.includes(x.room_id) && inScope(+x.date.slice(0, 4), +x.date.slice(5, 7)))
+    .filter((x) => !hidden.includes(x.tenant_id) && inScope(+x.date.slice(0, 4), +x.date.slice(5, 7)))
     .sort((a, b) => a.date.localeCompare(b.date));
   const mAll = sum(maint, (x) => Number(x.amount));
   const mTen = sum(maint.filter((x) => x.payer === 'tenant'), (x) => Number(x.amount));
@@ -86,7 +89,13 @@ export default function Reports() {
           </label>
           <label>بحث (رقم الغرفة أو الاسم)<input value={q} onChange={(e) => setQ(e.target.value)} /></label>
         </div>
-        {hidden.length > 0 && <p className="muted">غرف مخفية من التقارير: {hidden.join('، ')} <button className="btn sm ghost" onClick={() => setHidden([])}>إظهار الكل</button></p>}
+        {hidden.length > 0 && <p className="muted">مخفي من التقارير: {hidden.map(tn).join('، ')} <button className="btn sm ghost" onClick={() => setHidden([])}>إظهار الكل</button></p>}
+        {oldRows.length > 0 && (
+          <p className="muted">
+            {showOld ? 'المستأجرون السابقون (المخلون) ظاهرون في التقرير.' : `يوجد ${oldRows.length} مستأجر سابق (مخلى) عليهم متبقي ${money(sum(oldRows, (r) => r.remaining))} — مخفيون من التقرير.`}{' '}
+            <button className="btn sm ghost" onClick={() => setShowOld(!showOld)}>{showOld ? 'إخفاء المخلين' : 'إظهار المخلين'}</button>
+          </p>
+        )}
         <div className="row"><button className="btn" onClick={() => window.print()}>طباعة / تحميل PDF</button></div>
         <p className="muted">لتحميل PDF: اضغط الزر ثم اختر «حفظ كـ PDF» من نافذة الطباعة.</p>
       </div>
@@ -99,8 +108,8 @@ export default function Reports() {
         <div className="tablewrap" style={{ marginTop: 8 }}><table>
           <thead><tr>{rheads.map((h) => <th key={h}>{h}</th>)}<th className="no-print"></th></tr></thead>
           <tbody>{rows.map((r) => (
-            <tr key={r.tenant_id}><td>{r.room_id}</td><td>{r.tenant}</td>{rkeys.map((k) => <td key={k}>{money(r[k])}</td>)}<td><Badge s={r.status} /></td>
-              <td className="no-print"><button className="btn sm ghost" onClick={() => setHidden([...hidden, r.room_id])}>إخفاء</button></td></tr>
+            <tr key={r.tenant_id}><td>{r.room_id}</td><td>{r.tenant}{!r.active && <span className="badge vac" style={{ marginInlineStart: 6 }}>سابق</span>}</td>{rkeys.map((k) => <td key={k}>{money(r[k])}</td>)}<td><Badge s={r.status} /></td>
+              <td className="no-print"><button className="btn sm ghost" onClick={() => setHidden([...hidden, r.tenant_id])}>إخفاء</button></td></tr>
           ))}{!rows.length && <tr><td colSpan="9" className="muted">لا بيانات</td></tr>}</tbody>
           <tfoot><tr><td></td><td>الإجمالي</td>{rkeys.map((k) => <td key={k}>{money(rtot[k])}</td>)}<td></td><td className="no-print"></td></tr></tfoot>
         </table></div>
