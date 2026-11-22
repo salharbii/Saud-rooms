@@ -50,8 +50,8 @@ export function Load({ db, err }) {
   return null;
 }
 
-export function PayModal({ tenant, remaining, onClose, onSaved }) {
-  const [f, setF] = useState({ amount: remaining > 0 ? remaining : '', paid_at: new Date().toLocaleDateString('en-CA'), method: 'cash', note: '' });
+export function PayModal({ tenant, remaining, date, onClose, onSaved }) {
+  const [f, setF] = useState({ amount: remaining > 0 ? remaining : '', paid_at: date || new Date().toLocaleDateString("en-CA"), method: 'cash', note: '' });
   const [msg, setMsg] = useState('');
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   async function save() {

@@ -40,6 +40,7 @@ export default function Electricity() {
   }
 
   const set = (id, k) => (e) => setF({ ...f, [id]: { ...f[id], [k]: e.target.value } });
+  const meterNo = (id) => db.main_meters.find((x) => x.id === id)?.meter_no || '';
   const month = db.electricity_bills.filter((b) => b.year === y && b.month === m);
   const tot = month.reduce((s, b) => s + Number(b.amount), 0);
   const paidTot = month.reduce((s, b) => s + Number(b.paid_amount || 0), 0);
@@ -54,7 +55,7 @@ export default function Electricity() {
         {[1, 2].map((id) => (
           <div key={id} className="card">
             <div className="row" style={{ justifyContent: 'space-between', marginTop: 0 }}>
-              <b>العداد {id === 1 ? 'الأول' : 'الثاني'}</b>
+              <b>العداد {id === 1 ? 'الأول' : 'الثاني'} {meterNo(id) && <span className="muted">({meterNo(id)})</span>}</b>
               <Badge s={stat(f[id].amount, f[id].paid)} />
             </div>
             <label style={{ marginTop: 10 }}>مبلغ الفاتورة (ر.س)<input type="number" value={f[id].amount} onChange={set(id, 'amount')} /></label>

@@ -1,11 +1,14 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { useDB, useMonth, Load, Modal, PayModal, Badge, money } from '@/components/ui';
-import { monthReport, nowYM, today } from '@/lib/data';
+import { useDB, useMonth, Load, Modal, PayModal, Badge, money, MONTHS } from '@/components/ui';
+import { monthReport, today, dateFor, dYM, ym } from '@/lib/data';
+import { r2 } from '@/lib/calc';
 import { supabase, must } from '@/lib/supabase';
 
-function RoomForm({ room, tenant, mode, onClose, onSaved }) {
+const pad = (n) => String(n).padStart(2, '0');
+
+function RoomForm({ room, tenant, mode, y, m, onClose, onSaved }) {
   const [f, setF] = useState({ name: tenant?.name || '', phone: tenant?.phone || '', rent: room.monthly_rent || '', meter: room.sub_meter_no || '', start: today() });
   const [msg, setMsg] = useState('');
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -17,9 +20,9 @@ function RoomForm({ room, tenant, mode, onClose, onSaved }) {
       must(await supabase.from('rooms').update({ monthly_rent: rent || 0, sub_meter_no: f.meter || null }).eq('id', room.id));
       if (mode === 'add') must(await supabase.from('tenants').insert({ room_id: room.id, name: f.name.trim(), phone: f.phone || null, start_date: f.start }));
       if (mode === 'edit') must(await supabase.from('tenants').update({ name: f.name.trim(), phone: f.phone || null }).eq('id', tenant.id));
-      if (tenant && rent > 0) {
-        const { y, m } = nowYM();
-        must(await supabase.from('rent_records').update({ amount: rent }).eq('tenant_id', tenant.id).eq('year', y).eq('month', m));
+      if (tenant && rent > 0 && ym(y, m) >= dYM(tenant.start_date)) {
+        must(await supabase.from('rent_records').upsert({ tenant_id: tenant.id, year: y, month: m, amount: rent }, { onConflict: 'tenant_id,year,month' }));
+        must(await supabase.from('rent_records').delete().eq('tenant_id', tenant.id).or(`year.gt.${y},and(year.eq.${y},month.gt.${m})`));
       }
       onSaved();
     } catch (e) { setMsg(e.message); }
@@ -30,10 +33,10 @@ function RoomForm({ room, tenant, mode, onClose, onSaved }) {
         <label>اسم المستأجر<input value={f.name} onChange={set('name')} /></label>
         <label>رقم الجوال<input value={f.phone} onChange={set('phone')} inputMode="tel" /></label>
       </>}
-      <label>الإيجار الشهري (ر.س)<input type="number" value={f.rent} onChange={set('rent')} /></label>
+      <label>الإيجار الشهري الثابت (ر.س)<input type="number" value={f.rent} onChange={set('rent')} /></label>
       <label>رقم عداد الغرفة (اختياري)<input value={f.meter} onChange={set('meter')} /></label>
       {mode === 'add' && <label>تاريخ بداية الإيجار<input type="date" value={f.start} onChange={set('start')} /></label>}
-      {mode === 'edit' && <p className="muted">تغيير الإيجار يسري على الشهر الحالي وما بعده، وتبقى الأشهر السابقة كما هي.</p>}
+      <p className="muted">الإيجار يتكرر كل شهر تلقائياً. أي تغيير يسري من {MONTHS[m - 1]} {y} وما بعده، وتبقى الأشهر السابقة كما هي.</p>
       {msg && <p className="errbox">{msg}</p>}
       <div className="row"><button className="btn" onClick={save}>حفظ</button><button className="btn ghost" onClick={onClose}>إلغاء</button></div>
     </Modal>
@@ -67,13 +70,35 @@ export default function Rooms() {
   if (bad) return bad;
   const rows = monthReport(db, y, m);
   const done = () => { setModal(null); reload(); };
+
   async function vacate(t) {
     if (!confirm(`إخلاء ${t.name}؟ ستبقى كل حساباته ومديونيته محفوظة.`)) return;
     try { must(await supabase.from('tenants').update({ active: false, end_date: today() }).eq('id', t.id)); reload(); } catch (e) { alert(e.message); }
   }
+  async function markPaid(t, amount) {
+    try {
+      must(await supabase.from('payments').insert({ tenant_id: t.id, amount, paid_at: dateFor(y, m), method: 'cash', note: 'تم الدفع' }));
+      reload();
+    } catch (e) { alert(e.message); }
+  }
+  async function undoPaid(t) {
+    if (!confirm(`إلغاء دفعات ${t.name} المسجلة في ${MONTHS[m - 1]} ${y}؟`)) return;
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    try {
+      must(await supabase.from('payments').delete().eq('tenant_id', t.id).gte('paid_at', `${y}-${pad(m)}-01`).lte('paid_at', `${y}-${pad(m)}-${pad(last)}`));
+      reload();
+    } catch (e) { alert(e.message); }
+  }
+
   const card = (r) => {
     const t = db.tenants.find((x) => x.room_id === r.id && x.active);
     const row = t && rows.find((x) => x.tenant_id === t.id);
+    let pay = 0;
+    if (row && row.remaining > 0) {
+      const own = r2(row.total_due - row.previous_balance);
+      const dueNow = row.previous_balance > 0 ? Math.max(0, r2(own - row.paid)) : row.remaining;
+      pay = dueNow > 0 ? dueNow : row.remaining;
+    }
     return (
       <div key={r.id} className="card">
         <div className="row" style={{ justifyContent: 'space-between', marginTop: 0 }}>
@@ -82,13 +107,16 @@ export default function Rooms() {
         </div>
         <p style={{ margin: '8px 0 2px' }}>{t ? t.name : '—'}</p>
         <small className="muted">{t?.phone || ''}</small>
-        <p style={{ margin: '6px 0' }}>الإيجار: <b>{money(r.monthly_rent)}</b></p>
+        <p style={{ margin: '6px 0' }}>الإيجار الشهري: <b>{money(row ? row.rent : r.monthly_rent)}</b></p>
         <small className="muted">عداد الغرفة: {r.sub_meter_no || '—'}</small>
         {row && <div className="row"><Badge s={row.status} /><span>المتبقي: <b>{money(row.remaining)}</b></span></div>}
+        {row && row.previous_balance > 0 && <small className="muted">يشمل مديونية سابقة: {money(row.previous_balance)}</small>}
         <div className="row">
           {t ? <>
-            <Link className="btn sm" href={`/rooms/${r.id}`}>كشف الحساب</Link>
-            <button className="btn sm" onClick={() => setModal({ k: 'pay', t, rem: row?.remaining })}>دفعة</button>
+            {row && row.remaining > 0 && <button className="btn sm" onClick={() => markPaid(t, pay)}>✓ تم الدفع</button>}
+            {row && row.remaining > 0 && <button className="btn sm ghost" onClick={() => setModal({ k: 'pay', t, rem: row.remaining })}>دفعة جزئية</button>}
+            {row && row.paid > 0 && <button className="btn sm ghost" onClick={() => undoPaid(t)}>تراجع عن الدفع</button>}
+            <Link className="btn sm ghost" href={`/rooms/${r.id}`}>كشف الحساب</Link>
             <button className="btn sm ghost" onClick={() => setModal({ k: 'edit', r, t })}>تعديل</button>
             <button className="btn sm danger" onClick={() => vacate(t)}>إخلاء</button>
           </> : <>
@@ -100,10 +128,11 @@ export default function Rooms() {
       </div>
     );
   };
+
   const groups = [[1, 'المجموعة الأولى – غرف 1 إلى 10'], [2, 'المجموعة الثانية – غرف 11 إلى 20']];
   return (
     <>
-      <h1>الغرف</h1>
+      <h1>الغرف – {MONTHS[m - 1]} {y}</h1>
       {picker}
       {groups.map(([id, title]) => {
         const list = db.rooms.filter((r) => r.main_meter_id === id);
@@ -117,8 +146,8 @@ export default function Rooms() {
           </section>
         );
       })}
-      {modal?.k === 'pay' && <PayModal tenant={modal.t} remaining={modal.rem} onClose={() => setModal(null)} onSaved={done} />}
-      {['add', 'edit', 'room'].includes(modal?.k) && <RoomForm room={modal.r} tenant={modal.t} mode={modal.k} onClose={() => setModal(null)} onSaved={done} />}
+      {modal?.k === 'pay' && <PayModal tenant={modal.t} remaining={modal.rem} date={dateFor(y, m)} onClose={() => setModal(null)} onSaved={done} />}
+      {['add', 'edit', 'room'].includes(modal?.k) && <RoomForm room={modal.r} tenant={modal.t} mode={modal.k} y={y} m={m} onClose={() => setModal(null)} onSaved={done} />}
     </>
   );
 }
