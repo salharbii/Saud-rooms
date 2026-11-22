@@ -71,22 +71,32 @@ export default function Reports() {
     excel(eheads, data, file('electricity'));
   };
 
-  // 4) التقرير النهائي (ملخص الشهر)
+  // 4) التقرير النهائي (ملخص الشهر) – بدون خصم، الكهرباء على المستأجرين
   const fRows = allRows.filter((r) => (r.active || showOld) && !hidden.includes(r.tenant_id));
   const inMonth = (d) => +d.slice(0, 4) === y && +d.slice(5, 7) === m;
-  const fDue = sum(fRows, (r) => r.total_due - r.previous_balance);
+  const fRent = sum(fRows, (r) => r.rent + r.extras - r.discounts);
+  const fPrev = sum(fRows, (r) => r.previous_balance);
   const fPaid = sum(fRows, (r) => r.paid);
-  const fMaint = sum(db.maintenance.filter((x) => !hidden.includes(x.tenant_id) && inMonth(x.date)), (x) => Number(x.amount));
+  const fMonthMaint = db.maintenance.filter((x) => !hidden.includes(x.tenant_id) && inMonth(x.date));
+  const fMaintTen = sum(fMonthMaint.filter((x) => x.payer === 'tenant'), (x) => Number(x.amount));
+  const fMaintLand = sum(fMonthMaint.filter((x) => x.payer === 'landlord'), (x) => Number(x.amount));
   const fBills = db.electricity_bills.filter((b) => b.year === y && b.month === m);
   const fElecDue = sum(fBills, (b) => Number(b.amount));
   const fElecPaid = sum(fBills, (b) => Number(b.paid_amount || 0));
-  const netDue = r2(fDue - fMaint - fElecDue);
-  const netPaid = r2(fPaid - fMaint - fElecPaid);
-  const fExcel = () => excel(['البند', 'المستحق', 'الفعلي'], [
-    ['الإيجارات وما سُجّل على المستأجرين', fDue, fPaid],
-    ['الصيانة (خصم)', -fMaint, -fMaint],
-    ['الكهرباء (خصم)', -fElecDue, -fElecPaid],
-    ['الصافي النهائي', netDue, netPaid],
+  const fTotal = r2(fRent + fMaintTen + fElecDue + fPrev);
+  const fPaidAll = r2(fPaid + fElecPaid);
+  const fLeft = r2(fTotal - fPaidAll);
+  const fItems = [
+    ['الإيجارات (شامل المصاريف والخصومات)', fRent],
+    ['الصيانة على المستأجرين', fMaintTen],
+    ['الكهرباء', fElecDue],
+  ];
+  if (fPrev > 0) fItems.push(['مديونية سابقة', fPrev]);
+  const fExcel = () => excel(['البند', 'المبلغ'], [
+    ...fItems,
+    ['المجموع النهائي (المفروض تحصيله)', fTotal],
+    ['المدفوع', fPaidAll],
+    ['المتبقي', fLeft],
   ], file('final'));
 
   return (
@@ -170,17 +180,17 @@ export default function Reports() {
           <button className="btn sm no-print" onClick={fExcel}>تصدير Excel</button>
         </div>
         <div className="tablewrap" style={{ marginTop: 8 }}><table style={{ minWidth: 0 }}>
-          <thead><tr><th>البند</th><th>المستحق</th><th>الفعلي</th></tr></thead>
+          <thead><tr><th>البند</th><th>المبلغ</th></tr></thead>
           <tbody>
-            <tr><td>الإيجارات وما سُجّل على المستأجرين</td><td>{money(fDue)}</td><td>{money(fPaid)}</td></tr>
-            <tr><td>الصيانة (خصم)</td><td>− {money(fMaint)}</td><td>− {money(fMaint)}</td></tr>
-            <tr><td>الكهرباء (خصم)</td><td>− {money(fElecDue)}</td><td>− {money(fElecPaid)}</td></tr>
+            {fItems.map(([t, v]) => <tr key={t}><td>{t}</td><td>{money(v)}</td></tr>)}
           </tbody>
-          <tfoot><tr><td>الصافي النهائي</td>
-            <td style={{ color: netDue < 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(netDue)}</td>
-            <td style={{ color: netPaid < 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(netPaid)}</td></tr></tfoot>
+          <tfoot>
+            <tr><td>المجموع النهائي (المفروض تحصيله)</td><td>{money(fTotal)}</td></tr>
+            <tr><td>المدفوع</td><td style={{ color: 'var(--ok)' }}>{money(fPaidAll)}</td></tr>
+            <tr><td>المتبقي</td><td style={{ color: fLeft > 0 ? 'var(--bad)' : 'var(--ok)' }}>{money(fLeft)}</td></tr>
+          </tfoot>
         </table></div>
-        <p className="muted">الصافي = الإيجارات − الصيانة − الكهرباء. «المستحق» حسب ما يجب تحصيله، و«الفعلي» حسب ما دُفع فعلاً.</p>
+        <p className="muted">الكهرباء على المستأجرين فتُجمع مع الإيجارات ولا تُخصم. صيانة المؤجر ({money(fMaintLand)}) خارج المجموع.</p>
       </section>
     </>
   );
